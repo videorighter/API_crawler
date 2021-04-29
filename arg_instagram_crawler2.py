@@ -78,7 +78,7 @@ class instagramcrawler:
         url = "https://instagram28.p.rapidapi.com/hash_tag_medias"
         querystring = {"hash_tag": self.keyword}
         headers = {
-            'x-rapidapi-key': "insert api key",
+            'x-rapidapi-key': "b2e40330e9msh7950ea837c1c00bp138569jsnf852e2c621b6",
             'x-rapidapi-host': "instagram28.p.rapidapi.com"
         }
 
