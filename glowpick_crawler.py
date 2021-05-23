@@ -1,49 +1,49 @@
 # -*- coding:utf-8 -*-
+'''
+videorighter
+Glowpick crawler
+2021/05/23 technical portfolio refactoring
+'''
 
-from selenium import webdriver
+from selenium import webdriver as wd
 from selenium.webdriver.common.keys import Keys
 from bs4 import BeautifulSoup
 import time
 import re
-import db_model
+import utils
+import argparse
+import glowpick_crawler
+# import db_model
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 
-if __name__ == "__main__":
-
-    # 2020-09-03 first test
-    import db_model
-    import glowpick_crawler
-    import time
-
-    start = time.time()
-
-    crawler = glowpick_crawler.glowpickcrawler()
-
-    crawler.get_post_info()
-
-    print("time :", time.time() - start)
 
 class glowpickcrawler():
 
-    def __init__(self):
+    def __init__(self, args):
 
         self.post_list = []
         self.comment_list = []
-        self.db_model = db_model.DB_model()
-        self.keyword = input('검색어를 입력하세요: ')
         self.post_urls = []
+        self.args = args
+        # RDBMS 및 기타 util function 사용
+        # if self.args.is_db:
+        #     self.db_model = db_model.DB_model()
 
     def get_post_info(self):
-        row_id = self.db_model.set_daily_log(self.keyword, 4)
-        first_url = f"https://glowpick.com/search/result?query={self.keyword}"
-        chrome_options = webdriver.ChromeOptions()
+
+        # db 사용 시
+        # if self.args.is_db:
+        #     row_id = self.db_model.set_daily_log(self.args.keyword, 4)
+
+        first_url = f"https://glowpick.com/search/result?query={self.args.keyword}"
+        chrome_options = wd.ChromeOptions()
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
-        driver = webdriver.Chrome(executable_path="/usr/bin/chromedriver",
-                                  chrome_options=chrome_options)
+        driver = wd.Chrome(executable_path="/Users/oldman/Documents/crawler/chromedriver",
+                           chrome_options=chrome_options)
         driver.maximize_window()
         driver.implicitly_wait(20)
         driver.get(first_url)
@@ -51,14 +51,13 @@ class glowpickcrawler():
         product = driver.find_element_by_css_selector(
             "#gp-default-main > div > div > section.result__section--product > h3").text
         re_prod = int(re.compile("[0-9]+").findall(product)[0])
-        print(f"{self.keyword}의 검색결과: {re_prod}")
+        print(f"{self.args.keyword}의 검색결과: {re_prod}")
 
         # 스크롤 끝으로 이동하기 위해 화면을 클릭
         time.sleep(1)
         elem = driver.find_element_by_xpath('/html/body')
         elem.click()
         time.sleep(1)
-
 
         # 스크롤 END 버튼 한번에 제품 20개
         # 따라서 (총 검색결과)/20+1 만큼 END 버튼 누름
@@ -140,7 +139,7 @@ class glowpickcrawler():
                 volume = 0
             # 제목 없을 경우
             try:
-                title = self.db_model.addslashes(
+                title = utils.addslashes(
                     soup.find('span', {'class': 'product-main-info__product_name__text'}).text)
             except:
                 title = None
@@ -151,13 +150,13 @@ class glowpickcrawler():
                 like_count = 0
             # 내용 인식 못하는 경우
             try:
-                contents = self.db_model.addslashes(
+                contents = utils.addslashes(
                     re.sub("\n", ' ', soup.find('div', {'class': 'info__description'}).text))
             except AttributeError:
                 contents = None
             # 브랜드 없는 경우
             try:
-                brand = self.db_model.addslashes(soup.find("span", {"class": "brand_info__brand-name"}).text)
+                brand = utils.addslashes(soup.find("span", {"class": "brand_info__brand-name"}).text)
             except AttributeError:
                 brand = None
             # 가격 인식 못하는 경우
@@ -174,7 +173,7 @@ class glowpickcrawler():
 
             post_dict = {
                 'unique_id': post_url.split("/")[-1],
-                'keyword': self.keyword,
+                'keyword': self.args.keyword,
                 'title': title,
                 'user_id': 0,
                 'user_name': 0,
@@ -220,8 +219,10 @@ class glowpickcrawler():
 
             time.sleep(1)
             # 쿼리
-            body_is_new = self.db_model.set_data_body(4, post_dict)
-            self.db_model.set_data_body_info(4, body_is_new['is_new'], post_dict)
+            # if self.args.is_db:
+            #     body_is_new = self.db_model.set_data_body(4, post_dict)
+            #     self.db_model.set_data_body_info(4, body_is_new['is_new'], post_dict)
+            self.post_list.append(post_dict)
 
             age_attr_select = [x.text for x in driver.find_elements_by_css_selector(
                 "div.list-item > div > div > p > span.info > span.txt")]
@@ -243,12 +244,12 @@ class glowpickcrawler():
             for j in range(len(driver.find_elements_by_class_name("user-name"))):
                 comment_dict = {
                     "unique_id": post_url.split("/")[-1],
-                    "keyword": self.keyword,
+                    "keyword": self.args.keyword,
                     "comment_id": ", ".join([age[j], attr[j], gender[j]]),
                     "user_name": driver.find_elements_by_class_name("user-name")[j].text,
-                    "comment_date": self.db_model.conv_date_glow(driver.find_elements_by_css_selector(
+                    "comment_date": utils.conv_date_glow(driver.find_elements_by_css_selector(
                         "div > div > span.date")[j].text),
-                    "comment": self.db_model.addslashes(re.sub("\n", "", driver.find_elements_by_css_selector(
+                    "comment": utils.addslashes(re.sub("\n", "", driver.find_elements_by_css_selector(
                         "div > p.review")[j].text)),
                     "comment_like": grid[driver.find_elements_by_css_selector(
                         "#gp-default-main > section > div > ul.contents__reviews > li.contents__reviews__li--right."
@@ -257,9 +258,35 @@ class glowpickcrawler():
                 }
                 time.sleep(1)
                 # 쿼리
-                self.db_model.set_data_comment(4, comment_dict, body_is_new['is_new'], body_is_new['last_time_update'])
-        self.db_model.set_daily_log('', '', row_id)
+                # if self.args.is_db:
+                #     self.db_model.set_data_comment(4, comment_dict, body_is_new['is_new'], body_is_new['last_time_update'])
+
+                self.comment_list.append(comment_dict)
+        # if self.args.is_db:
+        #     self.db_model.set_daily_log('', '', row_id)
+        print("Done")
+        print(f'Crawled post num: {len(self.post_list)}\n'
+              f'Crawled comment num: {len(self.comment_list)}')
 
         driver.quit()
 
+        return self.post_list, self.comment_list
 
+
+def main():
+    # 2020-07-17 first test
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--keyword', nargs='+', type=str, default='틴트', help='Insert the keyword you want to crawl')
+    parser.add_argument('--is_db', type=bool, default=True, help='Are you going to use DB?')
+    args = parser.parse_args()
+
+    start = time.time()
+    crawler = glowpick_crawler.glowpickcrawler(args)
+    post_list, comment_list = crawler.get_post_info()
+    print(post_list)
+    print("time :", time.time() - start)
+
+
+if __name__ == "__main__":
+    main()

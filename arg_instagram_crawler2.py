@@ -6,12 +6,9 @@
 
 import requests
 import json
-import time
 import re
 from datetime import datetime
-from urllib import parse
 import db_model
-import random
 from unicodedata import normalize
 import sys
 
@@ -244,28 +241,32 @@ class instagramcrawler:
                 try:
                     contents = normalize('NFC', self.db_model.addslashes(
                         j['node']['edge_media_to_caption']['edges'][0]['node']['text'].replace('\n', ' ').replace(
-                            '\t', '').replace('\xa0', '')))
+                            '\t', '').replace('\xa0', '').replace('#', ' #')))
                 except IndexError:
                     contents = None
-
-                post_dict = {
-                    'unique_id': shortcode,
-                    'keyword': self.keyword,
-                    'title': '0',
-                    'user_id': j['node']['owner']['id'],
-                    'user_name': txt_json['data']['shortcode_media']['owner']['username'],
-                    'posting_date': datetime.utcfromtimestamp(j['node']['taken_at_timestamp']).strftime(
-                        '%Y-%m-%d %H:%M:%S'),
-                    'view_count': view_count,
-                    'like_count': j['node']['edge_liked_by']['count'],
-                    'dislike_count': 0,
-                    'contents': contents,
-                    'user_follow': 0,
-                    'user_follower': txt_json['data']['shortcode_media']['owner']['edge_followed_by']['count'],
-                    'user_medias': txt_json['data']['shortcode_media']['owner']['edge_owner_to_timeline_media'][
-                        'count'],
-                    'comment_count': txt_json['data']['shortcode_media']['edge_media_to_comment']['count']
-                }
+                try:
+                    post_dict = {
+                        'unique_id': shortcode,
+                        'keyword': self.keyword,
+                        'title': '0',
+                        'user_id': j['node']['owner']['id'],
+                        'user_name': txt_json['data']['shortcode_media']['owner']['username'],
+                        'posting_date': datetime.utcfromtimestamp(j['node']['taken_at_timestamp']).strftime(
+                            '%Y-%m-%d %H:%M:%S'),
+                        'view_count': view_count,
+                        'like_count': j['node']['edge_liked_by']['count'],
+                        'dislike_count': 0,
+                        'contents': contents,
+                        'user_follow': 0,
+                        'user_follower': txt_json['data']['shortcode_media']['owner']['edge_followed_by']['count'],
+                        'user_medias': txt_json['data']['shortcode_media']['owner']['edge_owner_to_timeline_media'][
+                            'count'],
+                        'comment_count': txt_json['data']['shortcode_media']['edge_media_to_comment']['count']
+                    }
+                except TypeError:
+                    print(txt_json)
+                    print("Post TypeError occurred.")
+                    continue
                 self.post_num += 1
 
                 # 쿼리
@@ -277,6 +278,7 @@ class instagramcrawler:
                     comment_json_list = []
                     # 20210112 추가
                     # comment request 시 end_point
+                    is_end_cursor = 0
                     while True:
                         while True:
                             comment_url = "https://instagram28.p.rapidapi.com/media_comments"
@@ -316,23 +318,33 @@ class instagramcrawler:
                             'page_info']['end_cursor']
                         querystring = {"short_code": shortcode, "next_cursor": end_cursor}
 
+                        is_end_cursor += 1
+
+                        if is_end_cursor == 5:
+                            break
+
                     print("length of comment_json_list: ", len(comment_json_list))
 
                     for k in comment_json_list:
                         path_to_comment = k['data']['shortcode_media']['edge_media_to_parent_comment']['edges']
 
                         for l in path_to_comment:
-                            comment_dict = {
-                                "unique_id": shortcode,
-                                "keyword": self.keyword,
-                                "comment_id": l['node']['id'],
-                                "user_name": l['node']['owner']['username'],
-                                "comment_date": datetime.utcfromtimestamp(l['node']['created_at']).strftime(
-                                    '%Y-%m-%d %H:%M:%S'),
-                                "comment": normalize('NFC', self.db_model.addslashes(l['node']['text'].replace(
-                                    '\n', '').replace('\t', ''))),
-                                "comment_like": l['node']['edge_liked_by']['count']
-                            }
+                            try:
+                                comment_dict = {
+                                    "unique_id": shortcode,
+                                    "keyword": self.keyword,
+                                    "comment_id": l['node']['id'],
+                                    "user_name": l['node']['owner']['username'],
+                                    "comment_date": datetime.utcfromtimestamp(l['node']['created_at']).strftime(
+                                        '%Y-%m-%d %H:%M:%S'),
+                                    "comment": normalize('NFC', self.db_model.addslashes(l['node']['text'].replace(
+                                        '\n', '').replace('\t', ''))),
+                                    "comment_like": l['node']['edge_liked_by']['count']
+                                }
+                            except TypeError:
+                                print(txt_json)
+                                print("Comment TypeError occurred.")
+                                continue
                             self.total_cmt_num += 1
                             # 쿼리 / body_is_new여부에 따라
                             self.db_model.set_data_comment(2, comment_dict, body_is_new['is_new'],
@@ -343,17 +355,22 @@ class instagramcrawler:
                             else:
                                 path_comm_comm = l['node']['edge_threaded_comments']['edges']
                                 for m in path_comm_comm:
-                                    comment_dict = {
-                                        "unique_id": shortcode,
-                                        "keyword": self.keyword,
-                                        "comment_id": m['node']['id'],
-                                        "user_name": m['node']['owner']['username'],
-                                        "comment_date": datetime.utcfromtimestamp(m['node']['created_at']).strftime(
-                                            '%Y-%m-%d %H:%M:%S'),
-                                        "comment": normalize('NFC', self.db_model.addslashes(m['node']['text'].replace(
-                                            '\n', '').replace('\t', ''))),
-                                        "comment_like": m['node']['edge_liked_by']['count']
-                                    }
+                                    try:
+                                        comment_dict = {
+                                            "unique_id": shortcode,
+                                            "keyword": self.keyword,
+                                            "comment_id": m['node']['id'],
+                                            "user_name": m['node']['owner']['username'],
+                                            "comment_date": datetime.utcfromtimestamp(m['node']['created_at']).strftime(
+                                                '%Y-%m-%d %H:%M:%S'),
+                                            "comment": normalize('NFC', self.db_model.addslashes(m['node']['text'].replace(
+                                                '\n', '').replace('\t', ''))),
+                                            "comment_like": m['node']['edge_liked_by']['count']
+                                        }
+                                    except TypeError:
+                                        print(txt_json)
+                                        print("Comment TypeError occurred.")
+                                        continue
                                     self.total_cmt_num += 1
                                     # 쿼리 / body_is_new여부에 따라
                                     self.db_model.set_data_comment(2, comment_dict, body_is_new['is_new'],

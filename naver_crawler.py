@@ -1,62 +1,74 @@
 # -*- coding:utf-8 -*-
+'''
+videorighter
+# 2020-08-20 first test
+naver blog crawler refactoring
+2021/05/23 technical portfolio refactoring
+'''
 
 from selenium import webdriver as wd
-import requests
 from bs4 import BeautifulSoup
 import time
 import re
 from datetime import datetime
-import db_model
-
-if __name__ == "__main__":
-    # 2020-08-20 first test
-    import db_model
-    import naver_crawler
-    import time
-
-    start = time.time()
-
-    crawler = naver_crawler.navercrawler()
-
-    post_list, comment_list = crawler.get_post_info()
-
-    print("time :", time.time() - start)
+# import db_model
+import utils
+import argparse
+import naver_crawler
+import requests
 
 
 class navercrawler():
 
-    def __init__(self):
+    def __init__(self, args):
 
         self.post_list = []
         self.comment_list = []
-        self.db_model = db_model.DB_model()
-        self.keyword = input('검색어를 입력하세요: ')
-        self.startdate = input('검색 시작 날짜를 입력하세요(YYYY-MM-DD): ')
-        self.enddate = input('검색 종료 날짜를 입력하세요(YYYY-MM-DD): ')
+        self.args = args
+        # RDBMS 및 기타 util function 사용
+        # if self.args.is_db:
+        #     self.db_model = db_model.DB_model()
 
     def get_post_info(self):
 
-        row_id = self.db_model.set_daily_log(self.keyword, 3)
+        keyword = ''
+        for i, word in enumerate(self.args.keyword):
+            if i == 0:
+                keyword += word
+            else:
+                keyword += "%20" + word
+
+        # db 사용 시
+        # if self.args.is_db:
+        #     row_id = self.db_model.set_daily_log(keyword, 3)
+
         first_url = f"https://section.blog.naver.com/Search/Post.nhn?pageNo=1&rangeType=PERIOD&orderBy=sim&startDate=" \
-                    f"{self.startdate}&endDate={self.enddate}&keyword={self.keyword}"
+                    f"{self.args.start_date}&endDate={self.args.end_date}&keyword={keyword}"
         chrome_options = wd.ChromeOptions()
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
-        driver = wd.Chrome(executable_path="/usr/bin/chromedriver", chrome_options=chrome_options)
+        driver = wd.Chrome(executable_path="/Users/oldman/Documents/crawler/chromedriver",
+                           chrome_options=chrome_options)
         driver.get(first_url)
         time.sleep(1.5)  # 안하면 못불러옴
+
         gunsu = driver.find_element_by_css_selector(
             '#content > section > div.category_search > div.search_information > span > span > em').text
-        print('{}에 대한 검색 결과 입니다. '.format(self.keyword), gunsu)
-        num = int(input('가져올 게시글 수를 입력하세요: '))
+        print(f'{keyword}에 대한 검색 결과 입니다. {gunsu}')
+
+        if int(utils.remove_str(gunsu)) < self.args.num:
+            print(f'요청 건수보다 적으므로 {gunsu}만큼 크롤링 합니다.')
+            num = int(utils.remove_str(gunsu))
+        else:
+            num = self.args.num
 
         # 검색 게시글 수 입력 -> 개수 맞게 페이지수 넘김 -> 해당 포스팅 링크 수집
         for i in range(num // 7 + 1):
 
             loop_url = f"https://section.blog.naver.com/Search/" \
                        f"Post.nhn?pageNo={i + 1}&rangeType=PERIOD&orderBy=sim&startDate=" \
-                       f"{self.startdate}&endDate={self.enddate}&keyword={self.keyword}"
+                       f"{self.args.start_date}&endDate={self.args.end_date}&keyword={keyword}"
             driver.get(loop_url)
             time.sleep(3)
             elems = driver.find_elements_by_css_selector("a.desc_inner")
@@ -121,14 +133,14 @@ class navercrawler():
 
                 # 블로그 종류 다른 경우
                 try:
-                    posting_date = self.db_model.conv_date_naver(
+                    posting_date = utils.conv_date_naver(
                         soup.find("span", {"class": "se_publishDate pcol2"}).text)
                 except AttributeError:
                     try:
-                        posting_date = self.db_model.conv_date_naver(
+                        posting_date = utils.conv_date_naver(
                             soup.find("p", {"class": "date fil5 pcol2 _postAddDate"}).text)
                     except AttributeError:
-                        posting_date = self.db_model.conv_date_naver(
+                        posting_date = utils.conv_date_naver(
                             soup.find("span", {"class": "se_publishDate pcol2"}).text)
 
                 # 블로그 종류 다른 경우
@@ -150,15 +162,15 @@ class navercrawler():
 
                 post_dict = {
                     'unique_id': blogno,
-                    'keyword': self.keyword,
-                    'title': self.db_model.addslashes(title),
+                    'keyword': keyword,
+                    'title': utils.addslashes(title),
                     'user_id': blogid,
                     'user_name': user_name,
                     'posting_date': posting_date,
                     'view_count': 0,
                     'like_count': like_count,
                     'dislike_count': 0,
-                    'contents': self.db_model.addslashes(contents),
+                    'contents': utils.addslashes(contents),
                     'user_follow': 0,
                     'user_follower': user_follower,
                     'user_medias': int(
@@ -168,24 +180,30 @@ class navercrawler():
                 }
                 time.sleep(1)
                 # 쿼리
-                body_is_new = self.db_model.set_data_body(3, post_dict)
+                # if self.args.is_db:
+                #     body_is_new = self.db_model.set_data_body(3, post_dict)
+
+                self.post_list.append(post_dict)
 
                 for k in range(len(soup.find_all("span", {"class": "u_cbox_nick"}))):
                     comment_dict = {
                         "unique_id": blogno,
-                        "keyword": self.keyword,
+                        "keyword": self.args.keyword,
                         "user_name": soup.find_all("span", {"class": "u_cbox_nick"})[k].text,
                         "comment_date": datetime.strptime(soup.find_all("span", {"class": "u_cbox_date"})[k].text,
                                                           '%Y.%m.%d. %H:%M').strftime("%Y-%m-%d %H:%M:%S"),
-                        "comment": self.db_model.addslashes(
+                        "comment": utils.addslashes(
                             soup.find_all("span", {"class": "u_cbox_contents"})[k].text),
                         "comment_like": 0
                     }
                     time.sleep(1)
 
                     # 쿼리 / body_is_new여부에 따라
-                    self.db_model.set_data_comment(3, comment_dict, body_is_new['is_new'],
-                                                   body_is_new['last_time_update'])
+                    # if self.args.is_db:
+                    #     self.db_model.set_data_comment(3, comment_dict, body_is_new['is_new'],
+                    #                                    body_is_new['last_time_update'])
+
+                    self.comment_list.append(comment_dict)
 
                 comm_page_path = driver.find_elements_by_class_name("u_cbox_page")
 
@@ -200,21 +218,52 @@ class navercrawler():
                     for l in range(len(soup.find_all("span", {"class": "u_cbox_nick"}))):
                         comment_dict = {
                             "unique_id": blogno,
-                            "keyword": self.keyword,
+                            "keyword": keyword,
                             "user_name": soup.find_all("span", {"class": "u_cbox_nick"})[l].text,
                             "comment_date": datetime.strptime(soup.find_all("span", {"class": "u_cbox_date"})[l].text,
                                                               '%Y.%m.%d. %H:%M').strftime("%Y-%m-%d %H:%M:%S"),
-                            "comment": self.db_model.addslashes(
+                            "comment": utils.addslashes(
                                 soup.find_all("span", {"class": "u_cbox_contents"})[l].text),
                             "comment_like": 0
                         }
                         time.sleep(1)
 
                         # 쿼리 / body_is_new여부에 따라
-                        self.db_model.set_data_comment(3, comment_dict, body_is_new['is_new'],
-                                                       body_is_new['last_time_update'])
+                        # if self.args.is_db:
+                        #     self.db_model.set_data_comment(3, comment_dict, body_is_new['is_new'],
+                        #                                    body_is_new['last_time_update'])
 
-        self.db_model.set_daily_log('', '', row_id)
+                        self.comment_list.append(comment_dict)
+        # RDBMS log
+        # if self.args.is_db:
+        #     self.db_model.set_daily_log('', '', row_id)
         driver.quit()
+        print("Done")
+        print(f'Crawled post num: {len(self.post_list)}\n'
+              f'Crawled comment num: {len(self.comment_list)}')
 
         return self.post_list, self.comment_list
+
+
+def main():
+    # 2020-07-17 first test
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--keyword', nargs='+', type=str, default='네이버블로그', help='Insert the keyword you want to crawl')
+    parser.add_argument('--is_db', type=bool, default=True, help='Are you going to use DB?')
+    parser.add_argument('--start_date', type=str, default='2021-01-01',
+                        help='Insert the start date you want to crawl (YYYY-MM-DD)')
+    parser.add_argument('--end_date', type=str, default='2021-06-01',
+                        help='Insert the end date you want to crawl (YYYY-MM-DD)')
+    parser.add_argument('--num', type=int, default=7, help='Insert the number you want to crawl')
+    args = parser.parse_args()
+
+    start = time.time()
+    crawler = naver_crawler.navercrawler(args)
+    post_list, comment_list = crawler.get_post_info()
+    print(post_list)
+    print("time :", time.time() - start)
+
+
+if __name__ == "__main__":
+    main()
